@@ -1,4 +1,11 @@
 import {hash} from './music.js';
+export const memoryColors=[{hex:'#39c9ef',name:'海盐蓝',word:'自由 / 清澈'},{hex:'#f5a77f',name:'落日橘',word:'温暖 / 相遇'},{hex:'#b497f5',name:'暮光紫',word:'怀念 / 梦境'},{hex:'#71d5b0',name:'薄荷绿',word:'治愈 / 生长'},{hex:'#ed91b2',name:'玫瑰粉',word:'心动 / 温柔'},{hex:'#e5c26f',name:'琥珀金',word:'珍贵 / 闪耀'}];
+export function validColor(value){return typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value)?value.toLowerCase():'#39c9ef'}
+function hsl(hex){const c=hex.slice(1).match(/../g).map(v=>parseInt(v,16)/255),[r,g,b]=c,max=Math.max(...c),min=Math.min(...c),d=max-min,l=(max+min)/2;let h=0;if(d)h=(max===r?(g-b)/d+(g<b?6:0):max===g?(b-r)/d+2:(r-g)/d+4)*60;return[h,d?d/(1-Math.abs(2*l-1)):0,l]}
+function rgb(h,s,l){const a=s*Math.min(l,1-l),f=n=>{const k=(n+h/30)%12;return Math.round(255*(l-a*Math.max(-1,Math.min(k-3,9-k,1))))};return[f(0),f(8),f(4)]}
+function recolor(hex,target){const [h,s]=hsl(target),[originalHue,originalSat,l]=hsl(hex);if(originalSat<.08)return hex;const shift=Math.max(-22,Math.min(22,originalHue-195));return '#'+rgb((h+shift+360)%360,s<.05?0:Math.max(.2,Math.min(.82,s*.85)),l).map(v=>v.toString(16).padStart(2,'0')).join('')}
+export function memoryTheme(p){const hex=validColor(p.memoryColor),rgb=hex.slice(1).match(/../g).map(v=>parseInt(v,16)).join(',');return {hex,rgb,name:memoryColors.find(c=>c.hex===hex)?.name||'我的专属色'}}
+export function themeStyle(p){const t=memoryTheme(p);return `--memory-color:${t.hex};--memory-rgb:${t.rgb}`}
 // Local vector artwork: recognize scene words, then use the story seed for variation.
 export function coverArt(p){
  const text=(p.title||'')+' '+(p.story||'')+' '+(p.story2||'');
@@ -12,6 +19,7 @@ export function coverArt(p){
  if(scene==='rain')detail+=Array.from({length:24},(_,i)=>`<path d="M${i*29%330} ${i*41%250}l-7 20" stroke="#b6eaf0" opacity=".4" stroke-width="2"/>`).join('');
  const stars=night?Array.from({length:20},(_,i)=>`<circle cx="${i*61%320}" cy="${i*37%150}" r="${i%3===0?1.4:.7}" fill="#e1f8ff" opacity=".65"/>`).join(''):'';
  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320"><defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="${colors[0]}"/><stop offset="1" stop-color="${colors[1]}"/></linearGradient><radialGradient id="glow"><stop stop-color="${colors[3]}" stop-opacity=".45"/><stop offset="1" stop-color="${colors[3]}" stop-opacity="0"/></radialGradient><filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".08"/></feComponentTransfer></filter></defs><path fill="url(#sky)" d="M0 0h320v320H0z"/>${stars}<circle cx="${x}" cy="105" r="100" fill="url(#glow)"/><circle cx="${x}" cy="105" r="${night?26:37}" fill="${colors[3]}"/>${night?`<circle cx="${x+13}" cy="94" r="25" fill="${colors[0]}"/>`:''}<path d="M18 72q40-14 78-2m110 75q46-14 91-4" stroke="#e7f6ed" opacity=".25" stroke-width="7" stroke-linecap="round" fill="none"/>${detail}<path fill="#fff" filter="url(#grain)" d="M0 0h320v320H0z"/></svg>`;
- return {url:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg),scene,night};
+ const tinted=p.memoryColor?svg.replace(/#[0-9a-f]{6}/gi,hex=>recolor(hex,validColor(p.memoryColor))):svg;
+ return {url:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(tinted),scene,night};
 }
-export function vinyl(p,cls=''){const art=coverArt(p);return `<div class="memory-vinyl ${cls}"><div class="vinyl-grooves"></div><img src="${art.url}" alt="根据回忆生成的${({sea:'海岸',rain:'雨夜',city:'城市',campus:'校园',mountain:'山林',dream:'梦境'})[art.scene]}插画" class="vinyl-art"><span class="vinyl-hole"></span><span class="vinyl-sheen"></span></div>`}
+export function vinyl(p,cls=''){const art=coverArt(p);return `<div class="memory-vinyl ${cls}" style="${themeStyle(p)}"><div class="vinyl-grooves"></div><img src="${art.url}" alt="根据回忆生成的${({sea:'海岸',rain:'雨夜',city:'城市',campus:'校园',mountain:'山林',dream:'梦境'})[art.scene]}插画" class="vinyl-art"><span class="vinyl-hole"></span><span class="vinyl-sheen"></span></div>`}
