@@ -1,0 +1,23 @@
+# Free web service only. The external PostgreSQL database is configured separately.
+services:
+  - type: web
+    name: recall-the-melody
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: REQUIRE_POSTGRES
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+# PUBLIC_URL defaults to Render's HTTPS address. Set it only for a custom domain.
+# Add DATABASE_CA in the dashboard if the database needs its own root certificate.

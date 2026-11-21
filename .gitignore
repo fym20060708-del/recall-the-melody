@@ -1,4 +1,12 @@
 work/
 outputs/
 node_modules/
+.data/
+.env
+.env.*
+!.env.example
 *.tar.gz
+*.zip
+*.log
+runtime/
+.openai/
