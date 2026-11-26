@@ -12,3 +12,38 @@ test('真实注册登录、哈希密码、Cookie 会话、注销及作品按账�
 test('两台设备登录不同账号，通过邀请提交各自回答，第三人无法占用或改写',async()=>{const t=await setup();try{const users=[];for(const username of ['host','guest','outsider'])users.push(await t.request('/auth/register','POST',{username,password}));const [host,guest,outsider]=users;const c=await t.request('/rooms','POST',{title:'共同看海',mode:'friends',style:'folk',ending:'resolve'},host.cookie);assert.equal(c.status,201);const id=c.data.room.id;assert.equal((await t.request('/rooms/'+id,'GET',undefined,outsider.cookie)).status,404);assert.equal((await t.request('/rooms/join','POST',{token:'bad'},guest.cookie)).status,404);const joined=await t.request('/rooms/join','POST',{token:c.data.inviteToken},guest.cookie);assert.equal(joined.data.room.role,'guest');assert.equal((await t.request('/rooms/join','POST',{token:c.data.inviteToken},outsider.cookie)).status,409);assert.equal((await t.request('/rooms/'+id+'/invite','POST',{},guest.cookie)).status,403);assert.equal((await t.request('/rooms/'+id+'/answer','PUT',{story:'风很大'},host.cookie)).status,400);await t.request('/rooms/'+id+'/answer','PUT',{story:'风很大',mood:'warm',shareConsent:true,instruments:{guitar:true}},host.cookie);const last=await t.request('/rooms/'+id+'/answer','PUT',{story:'但我很开心',mood:'happy',shareConsent:true,instruments:{violin:true}},guest.cookie);assert.equal(last.data.room.ready,true);const fromHost=(await t.request('/rooms/'+id,'GET',undefined,host.cookie)).data.room;assert.deepEqual(fromHost.hostAnswer,last.data.room.hostAnswer);assert.deepEqual(fromHost.guestAnswer,last.data.room.guestAnswer);assert.equal((await t.request('/rooms/'+id+'/answer','PUT',{story:'破坏',shareConsent:true},outsider.cookie)).status,404)}finally{await t.close()}});
 test('账号和房间可在服务重启后恢复，不依赖某一个浏览器',async()=>{const directory=mkdtempSync(join(tmpdir(),'recall-service-')),path=join(directory,'test.sqlite');let t=await setup({databasePath:path});try{const a=await t.request('/auth/register','POST',{username:'persistent',password}),r=await t.request('/rooms','POST',{title:'重启测试'},a.cookie),cookie=a.cookie,id=r.data.room.id;await t.close();t=await setup({databasePath:path});assert.equal((await t.request('/session','GET',undefined,cookie)).data.user.username,'persistent');assert.equal((await t.request('/rooms/'+id,'GET',undefined,cookie)).data.room.settings.title,'重启测试')}finally{await t.close();rmSync(directory,{recursive:true,force:true})}});
 test('认证限流与短密码拦截',async()=>{const t=await setup({authLimit:2});try{assert.equal((await t.request('/auth/register','POST',{username:'test',password:'short'})).status,400);assert.equal((await t.request('/auth/login','POST',{username:'none',password})).status,401);assert.equal((await t.request('/auth/login','POST',{username:'none',password})).status,429)}finally{await t.close()}});
+
+test('AI 接口校验来源、公开状态、在线登录与本机限流',async()=>{
+ let calls=0;
+ const aiOptions={apiKey:'secret',baseUrl:'https://model.example/v1',model:'test',fetchImpl:async()=>{calls++;return new Response('',{status:429})}};
+ let t=await setup({aiOptions});
+ try{
+  assert.deepEqual((await t.request('/ai/status')).data,{enabled:true,loginRequired:true});
+  assert.equal((await t.request('/ai/suggest','POST',{consent:true,story:'毕业'})).status,401);
+  assert.equal((await t.request('/ai/suggest','POST',{},'','https://evil.example')).status,403);
+  assert.equal(calls,0);
+ }finally{await t.close()}
+ t=await setup({localOnly:true,aiOptions,aiLimit:1});
+ try{
+  assert.equal((await t.request('/ai/status')).data.loginRequired,false);
+  assert.equal((await t.request('/ai/suggest','POST',{consent:true,story:'毕业'})).status,429);
+  assert.equal(calls,1);
+  assert.equal((await t.request('/ai/suggest','POST',{consent:true,story:'毕业'})).status,429);
+  assert.equal(calls,1);
+ }finally{await t.close()}
+ t=await setup({localOnly:true});
+ try{assert.equal((await t.request('/ai/status')).data.enabled,false);assert.equal((await t.request('/ai/suggest','POST',{consent:true,story:'毕业'})).status,503)}finally{await t.close()}
+});
+
+test('AI 成功建议经过 HTTP 接口校验，并能驱动现有音乐引擎',async()=>{
+ const expected={mood:'nostalgic',mood2:'happy',style:'ballad',ending:'soft',tempo:78,instruments:{piano:true,guitar:false,violin:true,bass:true,drums:false,melody:false,harmony:true},reason:'钢琴和弦乐呼应雨中告别。'};
+ const t=await setup({localOnly:true,aiOptions:{apiKey:'secret',baseUrl:'https://model.example/v1',model:'test',fetchImpl:async()=>Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(expected)}}]})}});
+ try{
+  const result=await t.request('/ai/suggest','POST',{story:'雨中的毕业告别',consent:true});
+  assert.equal(result.status,200);assert.deepEqual(result.data.suggestion,expected);
+  const {compose}=await import('../dist/music.js');
+  const {cleanProject}=await import('../backend/service.mjs');
+  const score=compose(cleanProject({story:'雨中的毕业告别',...result.data.suggestion}));
+  assert.equal(score.bpm,78);assert.equal(score.style,'ballad');assert.ok(score.duration>0);
+ }finally{await t.close()}
+});

@@ -1,3 +1,4 @@
+import {createAi} from './ai.mjs';
 import {openDatabase} from './database.mjs';
 import {randomBytes,randomUUID,createHash,scrypt as scryptCallback,timingSafeEqual} from 'node:crypto';
 import {promisify} from 'node:util';
@@ -8,13 +9,14 @@ const scrypt=promisify(scryptCallback),digest=s=>createHash('sha256').update(s).
 const fail=(status,message)=>{throw Object.assign(new Error(message),{status})};
 const string=(v,max=1200)=>typeof v==='string'?v.trim().slice(0,max):'';
 export function cleanProject(p){if(!p||typeof p!=='object'||typeof p.story!=='string'||!Object.hasOwn(styles,p.style)||!Object.hasOwn(moods,p.mood))fail(400,'作品内容无效');return {id:string(p.id,100)||randomUUID(),title:string(p.title,40)||'未命名的回忆',story:string(p.story),story2:string(p.story2),name1:string(p.name1,32),name2:string(p.name2,32),mode:['couple','friends'].includes(p.mode)?p.mode:'solo',mood:p.mood,mood2:Object.hasOwn(moods,p.mood2)?p.mood2:'warm',style:p.style,ending:Object.hasOwn(endings,p.ending)?p.ending:'soft',memoryColor:validColor(p.memoryColor),tempo:Number.isFinite(p.tempo)?Math.max(60,Math.min(150,Math.round(p.tempo))):null,mix:normalizeMix(p.mix),instruments:Object.fromEntries(['piano','guitar','violin','drums','bass','harmony','melody'].map(k=>[k,!!p.instruments?.[k]])),variation:Number.isInteger(p.variation)?Math.max(0,Math.min(10000,p.variation)):0,created:typeof p.created==='string'&&!isNaN(Date.parse(p.created))?p.created:new Date().toISOString()}}
-export async function createService({databasePath=':memory:',databaseUrl='',databaseCa='',publicUrl='',secureCookies=false,authLimit=20,localOnly=false}={}){
+export async function createService({databasePath=':memory:',databaseUrl='',databaseCa='',publicUrl='',secureCookies=false,authLimit=20,localOnly=false,aiOptions={},aiLimit=10}={}){
  const db=await openDatabase({databasePath,databaseUrl,databaseCa});
  await db.exec(`
  CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,created BIGINT NOT NULL);
  CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,expires BIGINT NOT NULL);
  CREATE TABLE IF NOT EXISTS projects(user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,id TEXT NOT NULL,data TEXT NOT NULL,updated BIGINT NOT NULL,PRIMARY KEY(user_id,id));
  CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,host_id TEXT NOT NULL REFERENCES users(id),guest_id TEXT REFERENCES users(id),invite_hash TEXT NOT NULL UNIQUE,settings TEXT NOT NULL,host_answer TEXT,guest_answer TEXT,revision INTEGER NOT NULL DEFAULT 0,updated BIGINT NOT NULL,expires BIGINT NOT NULL);`);
+ const ai=createAi(aiOptions),aiLimits=new Map();let aiActive=0;
  const limits=new Map();let activeHashes=0;
  async function userFor(req){const token=(req.headers.cookie||'').split(';').map(v=>v.trim()).find(v=>v.startsWith('recall_session='))?.slice(15);if(!token||token.length>200)return null;return (await db.prepare('SELECT u.id,u.username,u.display_name AS "displayName" FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires>?').get(digest(token),Date.now()))||null}
  const requireUser=async req=>(await userFor(req))||fail(401,'请先登录');
@@ -28,6 +30,17 @@ export async function createService({databasePath=':memory:',databaseUrl='',data
  const reply=(res,data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data))};
  async function handle(req,res){try{const path=new URL(req.url,'http://local').pathname,method=req.method;if(!path.startsWith('/api/'))return false;if(!['GET','HEAD'].includes(method))checkOrigin(req);
  if(path==='/api/health'&&method==='GET'){await db.prepare('SELECT 1 AS ok').get();reply(res,{ok:true,app:'recall-the-melody',localOnly,accounts:true,rooms:!localOnly});return true}
+ if(path==='/api/ai/status'&&method==='GET'){reply(res,{enabled:ai.enabled,loginRequired:!localOnly});return true}
+ if(path==='/api/ai/suggest'&&method==='POST'){
+  const user=localOnly?null:await requireUser(req);
+  const b=await body(req),now=Date.now(),key=user?.id||req.socket.remoteAddress||'local';
+  for(const [k,v] of aiLimits)if(v.until<now)aiLimits.delete(k);
+  const item=aiLimits.get(key)||{count:0,until:now+3600000};
+  if(item.count>=aiLimit)fail(429,'每小时最多分析 '+aiLimit+' 次，请稍后重试');
+  if(aiActive>=3)fail(429,'AI 正在处理其他故事，请稍后重试');
+  item.count++;aiLimits.set(key,item);aiActive++;
+  try{reply(res,{suggestion:await ai.suggest(b)})}finally{aiActive--}return true
+ }
  if(path==='/api/session'&&method==='GET'){reply(res,{user:await userFor(req),localOnly});return true}
  if(localOnly&&path.startsWith('/api/rooms'))fail(400,'Windows 本地版支持同机双人创作，不提供远程邀请房间');
  if(['/api/auth/register','/api/auth/login'].includes(path)&&method==='POST'){

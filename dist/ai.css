@@ -1,0 +1,8 @@
+.ai-assistant{margin-top:24px;padding:20px;border:1px solid #39c9ef50;border-radius:18px;background:#39c9ef09;overflow-wrap:anywhere}
+.ai-assistant h3,.ai-assistant h4{margin:0 0 12px}
+.ai-assistant p{font-size:14px;line-height:1.8;margin:12px 0}
+.ai-assistant .check{align-items:flex-start;line-height:1.7}
+.ai-assistant input[type=checkbox]{width:auto;flex-shrink:0;margin-top:6px}
+.ai-assistant button{max-width:100%;white-space:normal}
+.ai-assistant button:disabled{opacity:.6;cursor:wait}
+.ai-suggestion{margin-top:18px;padding-top:18px;border-top:1px solid #39c9ef40}

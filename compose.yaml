@@ -5,6 +5,9 @@ services:
     environment:
       PUBLIC_URL: https://${DOMAIN:?Set DOMAIN in .env}
       DATABASE_PATH: /data/recall.sqlite
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
     volumes:
       - recall_data:/data
     expose:
